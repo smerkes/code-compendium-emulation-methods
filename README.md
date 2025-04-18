@@ -1,1 +1,1 @@
-# code-compendium-emulation-methods
+# CODE COMPENDIUM: MULTIVARIATE AND FUNCTIONAL OUTPUT EMULATION
