@@ -4,8 +4,8 @@ This repository contains R code for emulating computer model outputs with multiv
 
 ## PDF Chapter and Rmd files related 
 
-  * mvEmulatorChapterCode.pdf: A follow-along for Chapter 7 in Adventures in Space-Time Modeling with Maike and Dave.
-  * mvEmulatorChapterCode.Rmd: *in development* to allow the audience to follow along more easily. 
+  * **mvEmulatorChapterCode.pdf**: A follow-along for Chapter 7 in Adventures in Space-Time Modeling with Maike and Dave.
+  * **mvEmulatorChapterCode.Rmd**: *in development* to allow the audience to follow along more easily. 
 
 ## .R Function Files
 Below is a list of the individual functions within each R script to help guide users in understanding where specific functions originate.
