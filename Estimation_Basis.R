@@ -123,7 +123,7 @@ pre_process = function(fn, x, q, nu=1e-6){
   # fcalc = sum(fvec*v2)
   
   # here's a simpler (coding-wise) calculation
-  aa = lm(fvec ~ Kbig - 1)
+  aa = lm(fvec ~ Kbigtest - 1)
   fcalc = sum(aa$residuals^2)
   
   L2 = ((s - q)*nc / 2) * log(nu) - 1/2 * (1 / nu) * fcalc
