@@ -5,10 +5,13 @@ output:
   pdf_document:
     toc: true
     toc_depth: 2
+    latex_engine: pdflatex
 author:
   - Maike Holthuijzen (\textit{maikeh@vt.edu})
   - Dave M. Higdon (\textit{dhigdon@vt.edu})
-date: "April 18th, 2025"
+  - Sierra N. Merkes (\textit{smerkes@vt.edu})
+date: "June 3rd, 2025"
+bibliography: references.bib  
 ---
 
 ```{r setup, include=FALSE}
@@ -17,7 +20,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 $~$\newpage 
 
-# A Simple Example 
+# 0. A Simple Example 
 
 We begin by constructing the functional model depicted in Figure 2 of the Chapter 7. Next, we source the required R files from [GitHub](https://github.com/smerkes/code-compendium-emulation-methods), which provide several utility functions used in the analysis. Finally, we define the two-dimensional input space over which the model (Eq 7.1) is evaluated.
 
@@ -51,7 +54,7 @@ We assume the function $f$ can be modeled as a zero-mean Gaussian Process (GP) w
 f \sim N(0, \sigma^2 (R_x \otimes R_t) + \nu I).
 \end{equation}
 
-## 1.1 Estimating Parameters
+# 1. Estimating Parameters
 
 We assume the prior for $f$ is given by Equation 1 and aim to derive the posterior distribution, $f|D_n$ where $D_n$ is the data. We estimate the parameters, $\phi_x, \phi_y,\sigma^2,\nu$, using the functions in `Estimation_1D.R`.
 
@@ -71,9 +74,7 @@ We then estimate the covariance parameters using the functions provided in `Esti
 The function `Estimate_params` takes the following arguments:
 
 * `distC` and `distR`: the first and second distance matrices in the Kronecker product (order matters)
-* `z`: the vector of computer model output to be emulated
-
-takes as arguments `distC` and `distR`,
+* `z`: the vector of computer model output to be emulated.
 
 The `nkmb` function returns the parameters estimates in the following order:
 
@@ -104,7 +105,7 @@ Parameter   $\phi_x$        $\phi_y$         $\nu$             $\sigma^2$
 Estimates  `r phi_x`        `r phi_y`        $10^{-6}$             `r sigma2`
 R Code     `params$par[1]`  `params$par[2]`  `params$par[3]`   `params$par[4]`
     
-### 1.1.1 Efficiently caluculating the sum of squares and log determinant
+## 1.1 Efficiently caluculating the sum of squares and log determinant
 
 In Chapter 7, Table 0.1, we present the fundamental calculations for exploiting the Kronecker structure in a multivariate emulator. The following *pseudocode* demonstrates how the log-determinant and sum of squares are computed efficiently and subsequently used in the parameter estimation functions in  `Estimation_1D.R`. The process begins by performing singular value decomposition (SVD) on $R_x$ and $R_t$ to obtain their respective components. Specifically, we perform **eigen-decomposition** on $R_x = U_x S_xU^T_x \text{ and } R_y = U_y S_yU^T_y$, as shown in Table 0.1
 
@@ -145,95 +146,92 @@ LogDet = sum(log(lambda))          # log determinant calculation in Table 0.1
 
 ## 1.2 Computing the conditional mean and covariance
 
-In this section, we use the parameter estimates from the previous section to obtain the (posterior) conditional mean and covariance. In other words, we obtain the posterior predictive distribution $f|D_n$, which is also multivariate normal distribution where $D_n$ represents the data.
+In this section, we use the parameter estimates from Section 1.1 to obtain the (posterior) conditional mean and covariance. In other words, we obtain the posterior predictive distribution $f|D_n$, which is also multivariate normal distribution where $D_n$ represents the data. Our goal is obtain computer model predictions $Y^*_{s \times n^*}$ at a new collection of $n^*$ input settings.
 
-
-First, we build $R_x$ and $R_t$ using estimates for $\phi_x$ and $\phi_t$ . Note that we assume Gaussian covariance functions throughout.
+First, we build the covariance matrices, $R_x$ and $R_t$, using their respective scale estimates, $\phi_x$ and $\phi_t$ . Note that we assume Gaussian covariance functions throughout.
 
 ```{r}
-scaleX = params$par[1]
-scalet = params$par[2]
+phi_x = params$par[1] # scale estimate for x
+phi_t = params$par[2] # scale estimate for t
 
-Rt = exp( -(Tdist / scalet)^2 )
-Rx = exp( -(Xdist / scaleX)^2 )
+# Estimating the covariance matrices
+Rx = exp( -(Xdist / phi_x)^2 )
+Rt = exp( -(Tdist / phi_t)^2 )
 ```
 
-Next, we set up a prediction grid for new $x$ locations ($x_{new}$). We also construct an augmented $x$ input space, where $x^* = \left [x, x_{new} \right ]$ and construct the cross covariance matrix $R_{x^*, x}$. Next, we perform an eigendomposition of $R_x$, $R_t$ and $R_{x^*, x}$ which is necessary for efficient computation of the conditional mean (see book chapter). Note that for this example, we only vary $x$, not $t$.
-
+Next, we create a prediction grid for new input locations, denoted by $x_{new}$. To facilitate predictions, we define an augmented input space, $x^*$ which combines the original inputs $x$ with the new inputs:$x^* = \left [x, x_{new} \right ]$. We then construct the cross-covariance matrix $R_{x^*, x}$ and the covariance matrix of $R_{x^*} = R_{x^*,x^*}$,  which are (sub) matrices defined in Section 0.1.1 in the textbook.
 
 ```{r}
-s = 11
+xnew = c(.135, .72, .97) # prediction grid of new locations, xnew
 
-# prediction grid of new locations, xnew
-xnew = c(.135, .72, .97)
-
-# make the augmented x grid
-xstar_grid = c(x1, xnew)
-
-# build covariance matrix, R_x*,x*
-dist_xstar_xstar = get_distmat(xstar_grid, xstar_grid)
-R_xstar_xstar = exp( -(dist_xstar_xstar / scaleX)^2 )
+xstar_grid = c(x1, xnew) # make the augmented x grid, xstar
 
 # build cross covariance matrix, R_x*,x
 dist_xstar_x = get_distmat(xstar_grid, x1)
+R_xstar_x = exp( -(dist_xstar_x / phi_x)^2 ) 
 
-R_xstar_x = exp( -(dist_xstar_x / scaleX)^2 ) 
+# build covariance matrix, R_x*,x*
+dist_xstar_xstar = get_distmat(xstar_grid, xstar_grid)
+R_xstar_xstar = exp( -(dist_xstar_xstar / phi_x)^2 )
 ```
 
-
-For the calculation of the conditional mean, we perform an eigendecomposition of $R_x$ and $R_t$
+For the calculation of the conditional mean, we perform an eigendecomposition of $R_x$ and $R_t$, which is necessary for efficient computation of the conditional mean (see book chapter). Note that for this example, we only vary $x$, not $t$.
 
 ```{r}
-svdx = svd(Rx)
-svdt = svd(Rt)
-
+svdx = svd(Rx)  # Eigndecomposition for Rx
 Ux = svdx$u
 Sx = svdx$d
 Ux_t = t(svdx$v)
 
+svdt = svd(Rt)  # Eigndecomposition for Rt
 Ut = svdt$u
 St = svdt$d
 Ut_t = t(svdt$v)
 ```
 
-Now, we can efficiently obtain the conditional mean using Kronecker product properties (see Table 0.1 in the book chapter).
+ In Table 0.1 in the book chapter, we define the conditional mean as
+
+$$E(\mathbf{y^*}|y_c) = \text{vec}\left(\sigma^2\left[U_tS_t\right] V [U^T_x R_{xx^*}] \right)$$
+where $V = \text{matrix}(\mathbf{v}, \text{nrow =} s, \text{ncol =} n_c)$ and $\mathbf{v} = \text{diag}(\lambda) \times \text{vec}\left(U^T_tYU_x \right)$. We can efficiently obtain the conditional mean using Kronecker product properties and the *psuedocode* illustrated in Section 1.1.1. 
+
+To define V, we need to compute $\text{diag}(\lambda)$ and $Y$ matrix. In Chapter 7 Table 0.1, we under the inverse label, we define $\text{diag}(\mathbf{\lambda}) =  \left(S_x \otimes S_t + \nu I \right)^{-1},$ and we define $Y$ matrix = $\text{matrix}(y_c , \text{nrow = } s, \text{ncol = } n_c)$, under the multiplication label. 
 
 ```{r}
-nu = params$par[3] 
-sig2 = params$par[4]
+nu = params$par[3]         # nu estimate 
+sig2 = params$par[4]     # sigma2 estimate
+# calculate kronecker product of singular values Sx and St    
+lambda = diag(1/ (sig2 * kronecker(Sx, St) + nu))                    
 
-# calculate kronecker product of singular values Sx and St
-lambda = diag(1 / (sig2*kronecker(Sx, St) + nu))
-
-# reshape the response to be s * nc
-f_reshape = matrix(f, nrow = s, ncol = nc)
-
-res1 = lambda %*% as.vector(Ut_t %*% f_reshape %*% Ux)
- 
-resmat = matrix(res1, nrow = s, ncol = nc)
-
-cond_mean = sig2 * as.vector(Rt %*% Ut %*% resmat %*% Ux_t %*% t(R_xstar_x) )
+# Construct (reshape) the response Y to be s * nc
+Y_mat = matrix(f, nrow = s, ncol = nc) 
 ```
 
+Given $\text{diag}(\lambda)$ and $Y$ matrix, we define $\mathbf{v} = \text{diag}(\mathbf{\lambda})\times \text{vec}\left(U^T_tYU_x \right)$ and reshape the vector into a matrix defined as $V = \text{matrix}(\mathbf{v}, \text{nrow =} s, \text{ncol =} n_c)$.
 
+```{r} 
+# Defining v and reshaping V
+v = lambda %*% as.vector(Ut_t %*% Y_mat %*% Ux)
+V = matrix(v, nrow = s, ncol = nc)
+```
 
-Now we can plot the conditional mean. In the code below, we only plot at test locations ($x_{new}$).
+Lastly, we evaluate $E(\mathbf{y^*}|y_c) = \text{vec}\left(\sigma^2\left[U_tS_t\right] V [U^T_x R_{xx^*}] \right)$.
+
+```{r}
+cond_mean = sig2 * as.vector(Rt %*% Ut %*% V %*% Ux_t %*% t(R_xstar_x) )
+```
+
+Let's plot the conditional mean, so that we can inspect the predicted mean on the grid of training points. In the code below, we only plot at test locations ($x_{new}$).
 
 ```{r, fig.align='center'}
 # grid for plotting 
-# train locations in black; test locations in red
-
 plot_grid_train = expand.grid(t1, x1)
 plot_grid = expand.grid(t1, xnew)
 
-# this is for differentiating train/test indices
+# Allows for differentiating train/test indices
 train_idx = 1:length(x1)
 train_idx_kron = 1:(length(train_idx) * length(t1))
 test_idx_kron = (train_idx_kron[length(train_idx_kron)] + 1): (length(xstar_grid) * s)
 ```
-
-
-Now we can inspect the predicted mean on the grid of training points. 
 
 ```{r, fig.dim = c(5, 5), fig.cap="Conditional mean predictions (red) on the grid of training points (black)", echo=FALSE}
 persp(t1, x1,
@@ -243,74 +241,93 @@ persp(t1, x1,
       xlab = 't', ylab = 'x', zlab = 'f', 
       zlim = c(-2.2, 2.4)) -> res
 
+# Training Points 
 points(trans3d(plot_grid_train[,1],
                plot_grid_train[,2], 
                cond_mean[train_idx_kron],
                pmat = res),
-       col = 'black',
-       pch = 16,
-       cex = 0.7)
+       col = 'black',pch = 16, cex = 0.7)
 
+# Test points
 points(trans3d(plot_grid[, 1],
                plot_grid[, 2], 
                cond_mean[test_idx_kron],
                pmat = res),
-       col = 'red',
-       pch = 16,
-       cex = 0.7)
+       col = 'red',pch = 16, cex = 0.7)
+#Legend
 legend("bottomleft", legend = c("train", "test"), col = c("black", "red"), pch = 19)
 ```
 
-### Generating conditional realizations
+### 1.2.1 Generating conditional realizations ($y^*|y_c$)
 
-For large $n$, obtaining the conditional variance may not be computationally feasible. However, as stated in the book chapter, we can use a technique described in \\citep{nychka2002multiresolution} to generate realizations from the conditional predictive distribution. 
+For large $n$, obtaining the conditional variance may not be computationally feasible. However, as stated in the book chapter, we can use a technique described in @nychka2002multiresolution to generate realizations from the conditional predictive distribution. 
 
-Before we delve into details, it is instructive to recall the matrix-normal distribution. The matrix-normal distribution (with error) \cite{stegle2011efficient} is related to the multivariate normal distribution as follows:
+Before diving into the details, let’s first review the matrix-normal distribution. As discussed in @stegle2011efficient, the matrix-normal distribution (with error) extends the multivariate normal distribution to matrix-valued random variables. Specifically, a random matrix $\mathbf{X}$ follows a matrix-normal distribution
+
 \begin{equation*}
-    \mathbf {X} \sim \mathcal{MN}_{n\times p}(\mathbf{M} ,\mathbf{U} ,\mathbf{V} ),\\
+    \mathbf {X} \sim \mathcal{MN}_{n\times p}(\mathbf{M} ,\mathbf{U} ,\mathbf{V}),\\
 \end{equation*}
 
-if and only if
-\begin{equation}\label{eq:MatrixNormalDist}
-    \textup{vec} (\mathbf{X} )\sim \mathcal{MVN}_{np} (\textup{vec} (\mathbf{M} ),\mathbf{V} \otimes \mathbf{U} ).
-\end{equation}
+if and only if its vectorized form $\text{vec}(\mathbf{X})$ follows a multivariate normal distribution:
 
-The probability distribution function (PDF) of the matrix-normal distribution is given by:
+\begin{equation}\label{eq:MatrixNormalDist}
+    \textup{vec} (\mathbf{X}) \sim \mathcal{MVN}_{np} (\textup{vec} (\mathbf{M} ),\mathbf{V} \otimes \mathbf{U} ).
+\end{equation}
+where $\otimes$ denotes the Kronecker product. The probability distribution function (PDF) of the matrix-normal distribution is given by:
+
 \begin{align*}
     P(\mathbf{X|M, U,V}) &= \frac{\textup{exp}(\textup{tr}([\mathbf{V^{-1}(X-M)^TU^{-1}(X-M)]})}{(2\pi)^{np/2} \mathbf{ |V|^{n/2} |U|^{p/2}}} \\
-    \mathbf{M} &= n \times p \\
-    \mathbf{U} &= n \times n \\
-    \mathbf{V} &= p \times p.
+    \mathbf{M} &= n \times p \text{ mean matrix }\\
+    \mathbf{U} &= n \times n \text{ row covariance matrix}\\
+    \mathbf{V} &= p \times p \text{ column covariance matrix},
 \end{align*}
 
-Suppose $\mathbf{Y}$ has a matrix normal distribution with mean matrix $Z =  \mathbf{0}_{n\times p}$ and covariance matrices $\mathbf{U}$ and $\mathbf{V}$. Then for a mean matrix $\mathbf{M}$ and linear transformations $\mathbf{L}$ and $\mathbf{R}$, $\mathbf{Y}$ can be expressed as:
+where $\text{tr}(\bullet)$ represents the matrix trace of the matrix and $\text{exp}(\bullet)$ represents the natural exponential. 
+
+Now, suppose $\mathbf{Y}$ has a matrix-normal distribution with zero mean matrix $Z =  \mathbf{0}_{n\times p}$ and covariance matrices $\mathbf{U}$ and $\mathbf{V}$. For a general mean matrix, $\mathbf{M}$, $\mathbf{Y}$ can be expressed as a linear transformation:
+
 \begin{equation}\label{eq:cholKronSim}
-    \mathbf{Y=M+LZR},
+    \mathbf{Y = M + L Z R},
 \end{equation}
 
-where $\mathbf{Y}$ has a matrix-normal distribution with parameters $\mathbf{M, LL^T, R^TR}$. In (\ref{eq:cholKronSim}), Cholesky decomposition is used to construct the matrices $\mathbf{L}$ and $\mathbf{R}$, the Cholesky factors of $\mathbf{U}$ and $\mathbf{V}$, respectively. If an eigendecomposition is used, then $\mathbf{LL^T = U_uD_u^{1/2}D_u^{1/2}U_u^T}$ is the eigendecomposition of $\mathbf{U}$ and $\mathbf{R^TR = U_v D_v^{1/2}D_v^{1/2}U_v^T}$ is the eigendecomposition of $\mathbf{V}$. This, in turn implies that (\ref{eq:cholKronSim}) can be used to generate MVN variates with $\mathbf{L = U_uD_u^{1/2}}$ and $\mathbf{R = D_v^{1/2}U_v^T}$
+that follows matrix-normal distribution with parameters $\mathbf{M, LL^T, R^TR}$ where $\mathbf{Z}$ is $n \times p$ matrix of independent standard normal random variables and $\mathbf{L}$ and $\mathbf{R}$ are transformation matrices such that $\mathbf{LL^T = U}$ and $\mathbf{R^TR = V}$. In Equation \ref{eq:cholKronSim}, $\mathbf{L}$ and $\mathbf{R}$ are be computed using the Cholesky decomposition of $\mathbf{U}$ and $\mathbf{V}$, respectively. 
 
-To efficiently sample from a MVN distribution with mean vector $m$ and covariance matrix $V \otimes U$, only a few steps are needed. We begin by expressing $m$ as a matrix $\mathbf{M}$ of size $n \times p$. The matrix of $N(0,1)$ random variates $\mathbf{Z}$ must also be of size $n \times p$. We use either Cholesky or an eigendecomposition to obtain $\mathbf{L}$ and $\mathbf{R}$ in (\ref{eq:cholKronSim}). We prefer the eigendecomposition, as it is more stable.
+Alternatively, if we use an eigendecomposition, for better numerical stability, then the eigndecomposition of $\mathbf{U}$ is $\mathbf{LL^T = U_uD_u^{1/2}D_u^{1/2}U_u^T},$ and the eigndecomposition of $\mathbf{V}$ is $\mathbf{R^TR = U_vD_v^{1/2}D_v^{1/2}U_v^T}.$  This, in turn implies that Equation \ref{eq:cholKronSim} can be used to generate MVN variates with $\mathbf{L = U_uD_u^{1/2}}$ and $\mathbf{R = D_v^{1/2}U_v^T}$. This approach provides an efficient and numerically stable method to generate matrix-normal random samples with mean matrix $M$ and covariance structure, $V \otimes U$. 
 
-To carry out the generation of realizations, we begin by performing eigendecompositions of $R_t$, $R_x$ and $R_{x^*, x^*}$:
+To efficiently sample from a MVN distribution with mean vector $m$ and covariance matrix $V \otimes U$, only a few steps are needed.
+
+\begin{enumerate}
+  \item Express mean vector $m$ into $n \times p$ matrix $\mathbf{M}$.
+  \item Generate an $n \times p$ matrix Z of standard ($N(0,1)$) normal random variates.
+  \item Compute $\mathbf{L}$ and $\mathbf{R}$ via eigendecomposition (preferred; as it is more stable) or Cholesky decomposition in Equation \ref{eq:cholKronSim}.
+\end{enumerate}
+
+In order to generate the condition realizations ($y^*|y_c$) in Chapter 7 Table 0.1 , we need (1) the eigendecompositions of $R_t$, $R_x$ and $R_{x^*, x^*}$, (2) the function `pre_process_svd` to carry out the $\text{vec}(U_t \tilde{Z} U^T_x)$ and (3) the function `cond_mean_mat`to efficiently calculate the *psuedo conditional mean* ($\mathbf{w^*}$).  We begin by performing eigendecompositions of $R_t$, $R_x$ and $R_{x^*, x^*}$:
 
 ```{r}
-svdR_xstar_xstar = svd(R_xstar_xstar)
-Rstst_U = svdR_xstar_xstar$u
-Rststd = svdR_xstar_xstar$d
-
+# Eigendecomposition of Rt
 svdt = svd(Rt)
 Ut = svdt$u
 Ut_t = t(svdt$v)
 St = svdt$d
 
+# Eigendecomposition of Rx
 svdx = svd(Rx)
 Sx = svdx$d
 Ux = svdx$u
 Ux_t = t(svdx$v)
+
+# Eigendecomposition of R_{xstar, xstar}
+svdR_xstar_xstar = svd(R_xstar_xstar)
+Rstst_U = svdR_xstar_xstar$u
+Rststd = svdR_xstar_xstar$d
 ```
 
-The function below carries out the calculation $(U_t \Tilde{Z} U_x^T)$ from table 0.1. 
+Next, we define the `pre_process_svd` function enabling us to compute the realization of $y$ by
+
+$$\mathbf{y} = \text{vec}(U_t \tilde{Z} U^T_x)$$
+where $\tilde{Z} = \text{matrix}(\mathbf{\tilde{z}}, \text{nrow } = s, \text{ncol = } n_c)$ , $\mathbf{\tilde{z}} =\sqrt{\mathbf{s}}\times\mathbf{z}$, and $\mathbf{s} = \text{diag}\left(S_x \otimes S_t \right)$. The function used the eigendecompositions of $R_t$ and $R_{x^*, x^*}$:
+
 ```{r}
 pre_process_svd = function(z, s, Ut, St, Rstst_U, Rststd){
   nc_prime = length(Rststd)
@@ -321,23 +338,8 @@ pre_process_svd = function(z, s, Ut, St, Rstst_U, Rststd){
 }
 ```
 
-Now we can carry out steps to generate realizations (steps are listed in Table 0.1 in the chapter). We generate a matrix of N(0,1) random variates and collect them into an appropriately sized matrix:
+The last step before we generate realizations is defining `get_cond_mean` function to enable us to efficiently calculate the *pseudo conditional mean* (i.e., $\mathbf{w^*}$). Recall $w^* = \sigma^2 \left(R_{x^*x} \otimes R_t \right)\left(\sigma^2 (R_x \otimes R_t) + \nu I \right)^{-1} \mathbf{\tilde{y}}$.
 
-```{r}
-nreals = 100
-nc_prime = length(Rststd)
-
-# generate a matrix of N(0,1)'s
-allZs = matrix(rnorm(s*nc_prime*nreals), nrow=s*nc_prime)
-```
-
-Here we set up an incidence matrix to make it easier to extract $\mathbf{u}$.
-```{r}
-kmat = matrix(0, nrow = length(train_idx_kron), ncol = s*nc_prime)
-kmat[train_idx_kron, train_idx_kron] = diag(1, nrow= length(train_idx_kron))
-```
-
-The function below will enable us to efficiently calculate the *psuedo conditional mean* ($\mathbf{w^*}$ from Table 0.1).
 ```{r}
 get_cond_mean = function(svdt, svdx, R_xstar_x, y_tilde, nu, sig2){
 
@@ -349,48 +351,89 @@ get_cond_mean = function(svdt, svdx, R_xstar_x, y_tilde, nu, sig2){
   Ux = svdx$u
   Ux_t = t(svdx$v)
   
-  # carry out conditional mean calculation for each 
-  # column of y_tilde, where each col of y_tilde is a single y_tilde as in Table .01
-  # if we do it this way, we can vectorize calculation steps as much as possible
-  # except for this one for loop....
+  # carry out conditional mean calculation for each column of y_tilde, 
+  # where each col of y_tilde is a single y_tilde as in Table .01
+  # If we do it this way, we can vectorize calculation steps as much as 
+  # possible except for this one for loop.
+  
   lambda = diag(1 / (sig2*kronecker(Sx, St) + nu))
   
   cond_mean_mat = matrix(nrow = nrow(R_xstar_x)*length(St), ncol = ncol(y_tilde))
-  for (i in 1:ncol(y_tilde)){
-    y_star_samp = y_tilde[, i]
-  # reshape to be s * nc
-  zreshape = matrix(y_star_samp, nrow = s, ncol = nc)
   
-  res1 = lambda %*% as.vector(Ut_t %*% zreshape %*% Ux)
-  
-  resmat = matrix(res1, nrow = s, ncol = nc)
-  
-  cond_mean_samp = sig2 * as.vector(Rt %*% Ut %*% resmat %*% Ux_t %*% t(R_xstar_x) )
-  cond_mean_mat[,i] = cond_mean_samp
+  for (i in 1:ncol(y_tilde))
+  {
+      y_star_samp = y_tilde[, i]
+      
+      # reshape to be s * nc
+      zreshape = matrix(y_star_samp, nrow = s, ncol = nc)
+      
+      # Defining v and reshaping V
+      v = lambda %*% as.vector(Ut_t %*% zreshape %*% Ux)
+      V = matrix(v, nrow = s, ncol = nc)
+      
+      # Evaluate the conditional mean
+      cond_mean_samp = sig2 * as.vector(Rt %*% Ut %*% V %*% Ux_t %*% t(R_xstar_x) )
+      cond_mean_mat[,i] = cond_mean_samp
   }
   return(cond_mean_mat)
 }
 ```
 
-Here are all the steps (the function `rmultnorm` is located in `Cov_functions.R`):
+
+Given that we have set up the eigndecomposition and the our two functions, we can carry out the steps to generate realizations listed in Chapter 7 Table 0.1. We generate a matrix of N(0,1) random variates (i.e., $\mathbf{z} \sim N(\mathbf{0}, \mathbf{I})$) and collect them into an appropriately sized matrix:
 
 ```{r}
-# generate epsilon ~ MVN(0, nu)
-epsilon = t(rmultnorm(nreals, rep(0, s*nc), diag(nu, nrow = s*nc)))
+nreals = 100
+nc_prime = length(Rststd)
 
+# Generate a matrix of N(0,1)'s
+allZs = matrix(rnorm(s*nc_prime*nreals), nrow=s*nc_prime)
+```
+
+Next, we set up an incidence matrix to make it easier to extract $\mathbf{u}$.
+```{r}
+kmat = matrix(0, nrow = length(train_idx_kron), ncol = s*nc_prime)
+kmat[train_idx_kron, train_idx_kron] = diag(1, nrow= length(train_idx_kron))
+```
+
+Now, we complete the steps listed out under the conditional realization of $y^*|y_c$ tab in Chapter 7 Table 0.1. Note the `rmultnorm` function is located in `Cov_functions.R`:
+
+1. Generate $\epsilon \sim N(\mathbf{0}, \nu \mathbf{I}_{n_c})$
+```{r}
+# Generate epsilon ~ MVN(0, nu)
+epsilon = t(rmultnorm(nreals, rep(0, s*nc), diag(nu, nrow = s*nc)))
+```
+
+2. Use the `pre_process_svd()` function to get $\mathbf{u^F} = \begin{pmatrix} \mathbf{u} \\ \mathbf{u^*} \end{pmatrix}$ and collect into a matrix
+```{r}
 # use the pre_process_svd() function to get u and collect into a matrix
 umat = apply(allZs,2, function(x) pre_process_svd(z=x, s=s, 
             Ut = Ut, St = St, Rstst_U = Rstst_U, Rststd = Rststd))
+```
+
+3. Set $\tilde{y} = \mathbf{u} + \mathbf{\epsilon}$ where we get $\mathbf{u}$ by multiplying the defined incidence matrix (`kmat`) by $\mathbf{u^F}$.  
+```{r}
 # get y_tilde
 y_tilde = kmat %*% umat + epsilon
+```
+
+4. Set $w^*$ using ` get_cond_mean` function.
+```{r}
 # get w_star
 w_star = get_cond_mean(svdt, svdx, R_xstar_x, y_tilde, nu, sig2)
+```
+
+5. Set $\mathbf{\tilde{u}^*} = \mathbf{u^*} - \mathbf{w^*}$
+```{r}
 ustar = umat - w_star
-# we calculated cond_mean previously
+```
+
+6. Calculate the realizations, $E(y^*|y_c) + \mathbf{\tilde{u}^*}$
+```{r}
 conditional_samps = as.vector(cond_mean) + ustar
 ```
 
-We can plot results as before and inspect the realizations.
+We plot results as before and inspect the realizations.
 ```{r, fig.align='center'}
 persp(t1, x1,
       matrix(cond_mean[train_idx_kron], nrow = s),
@@ -398,7 +441,9 @@ persp(t1, x1,
       phi = 10,
       xlab = 't', ylab = 'x', zlab = 'f', 
       zlim = c(-2.2, 2.4)) -> res
+
 for (i in 1:nreals){
+  # Training Points
   points(trans3d(plot_grid_train[,1],
                  plot_grid_train[,2], 
                  conditional_samps[train_idx_kron, i],
@@ -406,7 +451,7 @@ for (i in 1:nreals){
          col = 'black',
          pch = 16,
          cex = 0.7)
-  
+  # Test Points
   points(trans3d(plot_grid[, 1],
                  plot_grid[, 2], 
                  conditional_samps[test_idx_kron, i],
@@ -418,21 +463,23 @@ for (i in 1:nreals){
 legend("topright", legend = c("train", "test"), col = c("black", "red"), pch=19)
 ```
 
-# Parameter estimation: output basis strategies? Idk what to call this
-In this section we show how covariance parameters can be estimated for the case when  basis strategies is used for handling multivariate computer model output. Here, we choose to use bases based on singular value decomposition (see section 0.3.2.1 in the book chapter).
+$~$\newpage 
 
-A common choice of basis functions are estimated empirically from the existing ensemble of model outputs held in the $s \times n_c$ matrix $Y_c$ using empirical orthogonal functions (EOFs) \\cite{ramsay2005principal}; \\cite{hannachi2007empirical}. We use the simple example shown in Figure 2. The goal of the optimization is to minimize the negative of the (log) likelihood shown in (7) in the book chapter. We highly recommend reviewing the optimization functions in `Estimation_Basis.R`.
+# 2. Estimating Covariance Parameters via Output Basis Strategies
+
+In this section, we demonstrate how covariance parameters can be estimated when basis function strategies are used to represent multivariate computer model output. Specifically, we adopt basis functions derived from singular value decomposition (SVD); see Section 0.3.2.1 of the book chapter for details. A common choice for basis functions involves estimating them empirically from the ensemble of model outputs stored in the $s \times n_c$ matrix $Y_c$ using empirical orthogonal functions (EOFs) @ramsay2005principal; @hannachi2007empirical. We illustrate this with our simple example shown in Figure 3. The goal of the optimization is to minimize the negative log-likelihood, as defined in Equation (7) of the book chapter. We strongly recommend reviewing the optimization routines provided in `Estimation_Basis.R`.
 
 ```{r}
 s = 11         # size of output space
 nc = 10        # number of computer model runs
 
-t1 = seq(0,1,length = s)
-x1 = seq(0,1,length = nc)
-x = expand.grid(t1, x1)
+# Creates a grid of points where x[,2] represents x and x[,1] represents t 
+t1 = seq(0,1, length = s)
+x1 = seq(0,1, length = nc)
+x = expand.grid(t1,x1)
 
-# function to emulate
-f = (x[, 2]+1)*cos(pi*x[, 1]) + .03*(exp(x[, 2]))
+# Input grid points into the deterministic function to be emulated
+f = (x[,2]+1)*cos(pi*x[,1]) + 0.03*(exp(x[,2]))
 ```
 
 ```{r, fig.pos="H", fig.dim = c(5, 5), fig.cap="A simple functional model to be emulated", echo=FALSE, warning = FALSE}
@@ -446,93 +493,129 @@ points(trans3d(x[, 1], x[, 2],
        col = 'black',pch = 16,cex = 0.7)
 ```
 
-The optimization function `ML_pcEMU()` only requires three parameters: a vector of computer model output `fn`, computer model inputs `x`, and `q`, the number of bases used in representing computer model output. The parameter $\nu$ is not estimated here and is fixed at a value of 1e-5.
+The optimization function `ML_pcEMU()` in `Estimation_Basis.R` only requires three parameters: 
+
+1. a vector of computer model output `fn`, 
+2. computer model inputs `x`, 
+3. `q`, the number of bases used in representing computer model output. 
+
+The function return a list where each element of the list are the $\phi_j$'s and $\sigma^2_j$'s corresponding to $q_j$ and the parameter $\nu$ is not estimated and fixed at a value of 1e-5.
+
 ```{r}
-# carry out optimization
 params = ML_pcEMU(fn = f, x = x1, q = 2)
-print(params)
 ```
 
-\subsection{Conditional mean and realizations}
+The parameter estimates and associated R code to print the values are:
 
-Here is a function that returns the predictive mean and covariance matrix of $\mathbf{w}_j^*$ for new input locations `xnew`.
+| Bases Number | $\phi$             | $\sigma^2$         |
+|--------------|--------------------|--------------------|
+| j = 1        | `r params[[1]][1]` | `r params[[1]][2]` |
+| j = 2        | `r params[[2]][1]` | `r params[[2]][2]` |
+| R Code       | `params[[j]][1]`   |  `params[[j]][2]`  |
+
+
+## 2.1 Conditional mean and realizations
+
+In the Chapter 7, Section 0.3.1 , we provide the calculation to estimate the predictive mean and covariance matrix of $\mathbf{w}_j^*$ for new input locations `xnew`. We define and show the work for the the predictive distribution to be:
+
+
+$$\mathbf{w^*_j} | \mathbf{\hat{w_j}} \sim N(V_{21}V^{-1}_{11}\mathbf{\hat{w}_j} \quad, \quad V_{22} - V_{21}V^{-1}_{11} V_{12}),$$
+where we define $V_j$ as
+
+$$\begin{pmatrix} V_{11} & V_{12} \\ V_{21} & V_{22} \end{pmatrix} =  \left[ \begin{pmatrix} \frac{\nu}{\mathbf{k}^T_j\mathbf{k}} I_{n_c} & 0 \\ 0 & 0 \end{pmatrix} + \sigma^2_j R\left( \begin{pmatrix} X  \\ X^*  \end{pmatrix}; \phi_j\right)\right]; j = 1, \dots, q.$$
+For more details about the notation and work, references Chapter 7 Section 0.3. The `get_wstar_distr_preds` function returns a list of the predicted mean and covariance matrix of $\mathbf{w}_j^*$ for new input locations `xnew` using the work illustrated. 
 
 ```{r}
-# f =  function output at train points
-# xnew = vector of new locations
-# nc = number of computer runs
-# q = number of bases
-# x1 = original x train locations
-# params = object you get from the basis estimation function
-get_wstar_distr_preds = function(f, xnew, nc, q, x1,t1, params){
+get_wstar_distr_preds = function(f, xnew, nc, q, x1,t1, params)
+{
+  # f =  function output at train points
+  # xnew = vector of new locations
+  # nc = number of computer runs
+  # q = number of bases
+  # x1 = original x train locations
+  # params = object you get from the basis estimation function
   
   nc_new = length(xnew)
-  
   fmat = matrix(f, ncol=nc)
-  
   xdist_aug = as.matrix(dist( c(x1, xnew)) )
 
   # subtract means of rows
   meanf = apply(fmat, 1, mean)
   fmat0 = fmat - meanf
   
-  # do svd
+  # Singular Value Decomposition on 
   fsvd = svd(fmat0)
   
-  # make K
+  # Construct the K matrix
   K = fsvd$u[,1:q] %*% diag(fsvd$d[1:q]) / sqrt(nc)
   
-  s = nrow(K)
-  wlist = list()
+  # Allocate the list to hold predictive means and covariance
+  wlist = list() 
+  nu = 1e-6 # Set the nu estimate
   
-  preds = rep(0, length(t1)*nc_new)
-  for (i in 1:q){
+  for (i in 1:q)
+  {
+    # Collect the Estimates of phi and sigma
     phi = params[[i]][1]
     sig2 = params[[i]][2]
-
-    nu = 1e-6
     
+    # Defining j basis vector (k_j)
     kj = K[, i]
     
+    # Construct the R covariance matrix R(X, phi)
     Rcov = sig2*exp(-(phi*xdist_aug)^2)
+    # Estimate the nugget
     nug = nu / sum(kj^2)
     
-    # get the parts of V
+    # get the parts of V matrix
     sigma11 = nug * diag(1, nrow = nc, ncol = nc) +  Rcov[1:nc, 1:nc] 
     sigma12 = Rcov[1:nc,(nc+1):(nc+nc_new) ]
     sigma22 = Rcov[(nc+1):(nc+nc_new), (nc+1):(nc+nc_new) ]
     sigma21 = t(sigma12)
     
+    # Inverse of V_11
     sig11_inv = solve(sigma11)
     
-    what_j = fsvd$v[ ,i] * sqrt(nc) 
+    # Collect w_hat based on j 
+    w_hat_j = fsvd$v[ ,i] * sqrt(nc) 
     
-    wmean = sigma21 %*% sig11_inv %*% what_j
+    # Calculate the predictive mean 
+    wmean = sigma21 %*% sig11_inv %*% w_hat_j
     
+    # Calculate the covariance matri
     wcov = sigma22 - sigma21 %*%  sig11_inv %*% sigma12
+   
+    # Store the values
     sublist = list(wmean = wmean, wcov = wcov)
     wlist[[i]] = sublist
-
   }
-  
   return(list(wlist = wlist, K = K, meanf = meanf, fmat0 = fmat0))
-
 }
 ```
 
-Now, we can use our previous results to generate predictions using the function `get_wstar_distr_preds()`. Note that the function also returns the mean and covariance for $w^*$, which can be used to generate realizations. 
-```{r}
-w_stuff = get_wstar_distr_preds(f=f,xnew = xnew, nc=nc,q=2, x1=x1, t1=t1, params=params)
-# get predictive mean of w_1 and w_2
-w1 = as.vector( w_stuff$wlist[[1]]$wmean)
-w2 = as.vector( w_stuff$wlist[[2]]$wmean)
 
-# grab the K matrix
-K = w_stuff$K
+Using our parameter estimates of $\sigma^2$ and $\phi$ along with the `get_wstar_distr_preds()` function to generate predictions. Note that the function also returns the mean and covariance for $w^*$, which can be used to generate realizations. 
+
+```{r}
+# Calculate the predictive mean and covariance matrix of w_j^*
+w_obj = get_wstar_distr_preds(f=f,xnew = xnew, nc=nc,q=2, x1=x1, t1=t1, params=params)
+```
+
+After using the function, we can obtain various values such as the predictive means for each $w_j$, $K$ matrix, the mean of our function,$f$. 
+```{r}
+# predictive mean for w_1 and w_2
+w1 = as.vector(w_obj$wlist[[1]]$wmean)
+w2 = as.vector(w_obj$wlist[[2]]$wmean)
+
+# Obtain K matrix
+K = w_obj$K
 
 # mean of f (f is demeaned prior to parameter estimation)
-meanf = w_stuff$meanf
+meanf = w_obj$meanf
+```
 
+Using the obtained values from `get_wstar_distr_preds()` function, we calculate our predictions using the following code. 
+```{r}
 # make w's into a q x nc matrix 
 w_all = rbind(w1, w2)
 
@@ -541,7 +624,7 @@ basis_preds = K %*% w_all
 basis_preds = as.vector(basis_preds + meanf)
 ```
 
-Let's plot just the predictions (not realizations) to see if they look ok.
+Let's plot the predictions (not realizations) to see how they look.
 ```{r, fig.align='center'}
 persp(t1, x1,
       matrix(f, nrow = s),
@@ -550,33 +633,33 @@ persp(t1, x1,
       xlab = 't', ylab = 'x', zlab = 'f', 
       zlim = c(-2.4, 2.4)) -> res
 
+# Train
 points(trans3d(x[, 1], x[, 2], 
                f,
                pmat = res),
-       col = 'black',
-       pch = 16,
-       cex = 0.7)
+       col = 'black',pch = 16,cex = 0.7)
 
+# Test 
 points(trans3d(plot_grid[, 1],
                  plot_grid[, 2], 
                  basis_preds,
                  pmat = res),
-         col = 'red',
-         pch = 16,
-         cex = 0.7)
+         col = 'red',pch = 16, cex = 0.7)
 ```
 
-We can also generate realizations.
+As previously mentioned, we can also generate realizations by using the returned the predictive mean and covariance for $w^*_j$. The following code illustrates how to preform generate the realizations. 
 ```{r}
 # get covariance matrices for w's
-w1cov = w_stuff$wlist[[1]]$wcov
-w2cov = w_stuff$wlist[[2]]$wcov
+w1cov = w_obj$wlist[[1]]$wcov
+w2cov = w_obj$wlist[[2]]$wcov
 
+# Generate the realizations
 w1reals = rmultnorm(200, mu = w1, sigma = w1cov)
 w2reals = rmultnorm(200, mu = w2, sigma = w2cov)
 
 reals_matrix = matrix(nrow = 200, ncol = length(basis_preds))
-for (i in 1:200){
+for (i in 1:200)
+{
   w_all = rbind(w1reals[i,], w2reals[i, ])
   bpreds = as.vector(K %*% w_all + meanf)
   reals_matrix[i, ] = bpreds
@@ -584,7 +667,9 @@ for (i in 1:200){
 ```
 
 
+# References
 
+<div id="refs"></div>
 
 
 
